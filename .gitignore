@@ -44,3 +44,8 @@ data/
 # Логи
 logs/
 *.log 
+
+# Временные файлы
+data/temp/
+*.png
+chromedriver*

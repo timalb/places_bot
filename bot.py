@@ -11,6 +11,14 @@ from geocoder import Geocoder
 import os
 import folium
 from folium import plugins
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import time
+from PIL import Image
+import aiohttp
 
 logging.basicConfig(level=logging.INFO)
 
@@ -89,33 +97,49 @@ async def cmd_map(message: types.Message):
             await message.answer("У вас пока нет сохраненных мест")
             return
 
-        # Создаем карту
+        # Создаем HTML карту для интерактивного просмотра
         m = folium.Map(location=[55.7558, 37.6173], zoom_start=12)
+        bounds = []
+
+        # Сначала отправляем каждое место как отдельную точку на карте
+        await message.answer("Ваши сохраненные места:")
         
         for place_name, address, lat, lon in places:
-            if lat and lon:  # Если есть координаты
+            if lat and lon:
+                # Добавляем маркер на HTML карту
                 folium.Marker(
                     location=[lat, lon],
-                    popup=f"{place_name}\n{address}",
+                    popup=f"<b>{place_name}</b><br>{address}",
                     icon=folium.Icon(color='red', icon='info-sign')
                 ).add_to(m)
+                bounds.append([lat, lon])
+                
+                # Отправляем место через Telegram
+                await message.answer_venue(
+                    latitude=lat,
+                    longitude=lon,
+                    title=place_name,
+                    address=address
+                )
 
-        # Сохраняем карту во временный файл
-        map_file = f"data/map_{message.from_user.id}.html"
-        os.makedirs('data', exist_ok=True)
+        if bounds:
+            m.fit_bounds(bounds)
+
+        # Сохраняем и отправляем HTML версию для просмотра в браузере
+        os.makedirs('data/temp', exist_ok=True)
+        map_file = f"data/temp/map_{message.from_user.id}.html"
         m.save(map_file)
-
-        # Отправляем файл пользователю
+        
         await message.answer_document(
             document=types.FSInputFile(map_file),
-            caption="Карта ваших мест"
+            caption="Интерактивная версия карты (HTML) для просмотра в браузере"
         )
         
         # Удаляем временный файл
         os.remove(map_file)
-        
+
     except Exception as e:
-        logging.error(f"Error generating map: {e}")
+        logging.error(f"Error generating map: {e}", exc_info=True)
         await message.answer("Произошла ошибка при создании карты")
 
 @dp.message(F.text)
