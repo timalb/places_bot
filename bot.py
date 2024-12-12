@@ -8,6 +8,9 @@ from aiogram.filters import Command
 from config import load_config
 from database import Database
 from geocoder import Geocoder
+import os
+import folium
+from folium import plugins
 
 logging.basicConfig(level=logging.INFO)
 
@@ -24,9 +27,7 @@ class UserState(StatesGroup):
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
     try:
-        # Добавляем пользователя в базу данных
         await db.add_user(message.from_user.id)
-        
         await message.answer(
             "Привет! Я бот для сохранения и отображения интересных мест на карте. "
             "Для начала работы мне нужно знать ваш город по умолчанию. "
@@ -55,6 +56,7 @@ async def cmd_help(message: types.Message):
     /start - Начать работу с ботом и указать город по умолчанию
     /help - Показать это сообщение
     /places - Показать список всех сохраненных мест
+    /map - Показать все места на карте
     
     Чтобы добавить новое место, просто отправьте сообщение в формате:
     Название места - адрес
@@ -79,6 +81,43 @@ async def cmd_places(message: types.Message):
         logging.error(f"Error getting places: {e}")
         await message.answer("Произошла ошибка при получении списка мест")
 
+@dp.message(Command("map"))
+async def cmd_map(message: types.Message):
+    try:
+        places = await db.get_user_places_with_coords(message.from_user.id)
+        if not places:
+            await message.answer("У вас пока нет сохраненных мест")
+            return
+
+        # Создаем карту
+        m = folium.Map(location=[55.7558, 37.6173], zoom_start=12)
+        
+        for place_name, address, lat, lon in places:
+            if lat and lon:  # Если есть координаты
+                folium.Marker(
+                    location=[lat, lon],
+                    popup=f"{place_name}\n{address}",
+                    icon=folium.Icon(color='red', icon='info-sign')
+                ).add_to(m)
+
+        # Сохраняем карту во временный файл
+        map_file = f"data/map_{message.from_user.id}.html"
+        os.makedirs('data', exist_ok=True)
+        m.save(map_file)
+
+        # Отправляем файл пользователю
+        await message.answer_document(
+            document=types.FSInputFile(map_file),
+            caption="Карта ваших мест"
+        )
+        
+        # Удаляем временный файл
+        os.remove(map_file)
+        
+    except Exception as e:
+        logging.error(f"Error generating map: {e}")
+        await message.answer("Произошла ошибка при создании карты")
+
 @dp.message(F.text)
 async def process_place(message: types.Message, state: FSMContext):
     try:
@@ -98,14 +137,21 @@ async def process_place(message: types.Message, state: FSMContext):
             return
 
         full_address = f"{address}, {user_city}"
-        formatted_address = await geocoder.get_formatted_address(full_address)
+        coordinates = await geocoder.geocode(full_address)
         
-        if formatted_address:
-            await db.add_place(message.from_user.id, place_name, formatted_address)
+        if coordinates:
+            latitude, longitude = coordinates
+            await db.add_place(
+                user_id=message.from_user.id,
+                place_name=place_name,
+                address=full_address,
+                latitude=latitude,
+                longitude=longitude
+            )
             await message.answer(
                 f"Место сохранено:\n"
                 f"📍 {place_name}\n"
-                f"🏠 {formatted_address}"
+                f"🏠 {full_address}"
             )
         else:
             await message.answer("Не удалось определить адрес. Пожалуйста, проверьте правильность написания.")

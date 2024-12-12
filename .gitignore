@@ -36,3 +36,11 @@ ENV/
 .vscode/
 *.swp
 *.swo 
+
+# Логирование
+data/
+*.log 
+
+# Логи
+logs/
+*.log 

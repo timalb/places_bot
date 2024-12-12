@@ -20,24 +20,44 @@ class Database:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            # Таблица мест
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS places (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
-                    place_name TEXT,
-                    address TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users (user_id)
-                )
-            """)
+            
+            # Проверяем существование таблицы places
+            cursor = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='places'")
+            table_exists = await cursor.fetchone()
+            
+            if table_exists:
+                # Если таблица существует, проверяем наличие колонок
+                try:
+                    await db.execute("ALTER TABLE places ADD COLUMN latitude REAL")
+                except:
+                    pass  # Колонка уже существует
+                try:
+                    await db.execute("ALTER TABLE places ADD COLUMN longitude REAL")
+                except:
+                    pass  # Колонка уже существует
+            else:
+                # Создаем новую таблицу с нужными колонками
+                await db.execute("""
+                    CREATE TABLE places (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER,
+                        place_name TEXT,
+                        address TEXT,
+                        latitude REAL,
+                        longitude REAL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (user_id) REFERENCES users (user_id)
+                    )
+                """)
+            
             await db.commit()
 
-    async def add_place(self, user_id: int, place_name: str, address: str):
+    async def add_place(self, user_id: int, place_name: str, address: str, latitude: float = None, longitude: float = None):
         async with aiosqlite.connect(self.db_name) as db:
             await db.execute(
-                "INSERT INTO places (user_id, place_name, address) VALUES (?, ?, ?)",
-                (user_id, place_name, address)
+                """INSERT INTO places (user_id, place_name, address, latitude, longitude) 
+                   VALUES (?, ?, ?, ?, ?)""",
+                (user_id, place_name, address, latitude, longitude)
             )
             await db.commit()
 
@@ -73,3 +93,14 @@ class Database:
             ) as cursor:
                 result = await cursor.fetchone()
                 return result[0] if result else None 
+
+    async def get_user_places_with_coords(self, user_id: int):
+        async with aiosqlite.connect(self.db_name) as db:
+            async with db.execute(
+                """SELECT place_name, address, latitude, longitude 
+                   FROM places 
+                   WHERE user_id = ? AND latitude IS NOT NULL AND longitude IS NOT NULL
+                   ORDER BY created_at DESC""",
+                (user_id,)
+            ) as cursor:
+                return await cursor.fetchall()
